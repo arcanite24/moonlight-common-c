@@ -444,6 +444,12 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
             // be decoded. The nonary (vibeshine) host otherwise sends a length-prefixed framing
             // we don't parse.
             err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowaveFeatures", "1");
+
+            // A calibrated frame pace; Vibepollo rejects 0 or values above 400000
+            if (StreamConfig.pyrowavePaceMbps > 0 && StreamConfig.pyrowavePaceMbps <= 400000) {
+                snprintf(payloadStr, sizeof(payloadStr), "%d", StreamConfig.pyrowavePaceMbps);
+                err |= addAttributeString(&optionHead, "x-ss-video[0].pyrowavePaceMbps", payloadStr);
+            }
         }
         else if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_AV1) {
             err |= addAttributeString(&optionHead, "x-nv-vqos[0].bitStreamFormat", "2");
