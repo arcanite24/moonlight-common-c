@@ -112,6 +112,11 @@ typedef struct _STREAM_CONFIGURATION {
     // few minutes. Sent as x-ml-video.clientRefreshRateUhz, which other hosts ignore. 0 sends
     // nothing.
     int clientRefreshRateUhz;
+
+    // PyroWave only: the rate in Mbps at which the host should send each frame's packet groups,
+    // usually found by a UDP burst calibration (Vibepollo's /pyrowave-udp-probe). Sent as
+    // x-ss-video[0].pyrowavePaceMbps when PyroWave is negotiated; 0 leaves pacing to the host.
+    int pyrowavePaceMbps;
 } STREAM_CONFIGURATION, *PSTREAM_CONFIGURATION;
 
 // Use this function to zero the stream configuration when allocated on the stack or heap
