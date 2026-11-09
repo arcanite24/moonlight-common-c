@@ -72,7 +72,7 @@ typedef struct _CLOCK_SYNC_SAMPLE {
     int64_t rttUs;
     int64_t offsetUs; // The host's clock minus ours
     uint64_t hostUs; // When the host received the request
-} CLOCK_SYNC_SAMPLE;
+} CLOCK_SYNC_SAMPLE, *PCLOCK_SYNC_SAMPLE;
 
 static PLT_MUTEX clockSyncLock;
 static CLOCK_SYNC_SAMPLE clockSyncSamples[CLOCK_SYNC_SAMPLES];
@@ -83,6 +83,17 @@ static int64_t clockSyncOffsetUs;
 static uint64_t clockSyncHostUs;
 static uint32_t clockSyncSentSequence[CLOCK_SYNC_SENT_SLOTS];
 static uint64_t clockSyncSentUs[CLOCK_SYNC_SENT_SLOTS];
+
+// How fast the host's clock runs against ours (LiGetHostClockRate()): a least squares line
+// through the offset of the fastest exchange of each round of CLOCK_SYNC_SAMPLES, against the
+// host's time. Rounds whose fastest exchange was much slower than the fastest seen are left
+// out, since their offset is only known to within half their round trip.
+#define CLOCK_RATE_MIN_SPAN_US 30000000
+#define CLOCK_RATE_RTT_SLACK_US 500
+static int64_t clockRateBestRttUs;
+static uint64_t clockRateFirstHostUs;
+static uint64_t clockRateLastHostUs;
+static double clockRateN, clockRateSx, clockRateSy, clockRateSxx, clockRateSxy;
 
 // Initialize the video stream
 void initializeVideoStream(void) {
@@ -104,6 +115,10 @@ void initializeVideoStream(void) {
     clockSyncHostUs = 0;
     memset(clockSyncSentSequence, 0, sizeof(clockSyncSentSequence));
     memset(clockSyncSentUs, 0, sizeof(clockSyncSentUs));
+    clockRateBestRttUs = 0;
+    clockRateFirstHostUs = 0;
+    clockRateLastHostUs = 0;
+    clockRateN = clockRateSx = clockRateSy = clockRateSxx = clockRateSxy = 0;
 }
 
 // Clean up the video stream
@@ -191,6 +206,32 @@ static void handleClockSyncReply(PSS_CLOCK_SYNC_REPLY reply, uint64_t receivedUs
         }
         clockSyncOffsetUs = clockSyncSamples[best].offsetUs;
         clockSyncHostUs = clockSyncSamples[best].hostUs;
+
+        // Each full round of samples adds its fastest exchange to the clock rate fit
+        if (clockSyncNextSample == 0) {
+            PCLOCK_SYNC_SAMPLE sample = &clockSyncSamples[best];
+
+            if (clockRateBestRttUs == 0 || sample->rttUs < clockRateBestRttUs) {
+                clockRateBestRttUs = sample->rttUs;
+            }
+            if (sample->rttUs <= clockRateBestRttUs + clockRateBestRttUs / 2 + CLOCK_RATE_RTT_SLACK_US) {
+                double x, y;
+
+                if (clockRateN == 0) {
+                    clockRateFirstHostUs = sample->hostUs;
+                }
+                clockRateLastHostUs = sample->hostUs;
+
+                // Seconds on the host's clock, and microseconds of offset: the slope is in ppm
+                x = ((double)sample->hostUs - (double)clockRateFirstHostUs) / 1000000.0;
+                y = (double)sample->offsetUs;
+                clockRateN += 1;
+                clockRateSx += x;
+                clockRateSy += y;
+                clockRateSxx += x * x;
+                clockRateSxy += x * y;
+            }
+        }
     }
 
     first = !clockSyncValid;
@@ -231,6 +272,25 @@ bool LiGetHostTimeOnLocalClock(uint64_t presentationTimeUs, uint64_t* localTimeU
 
     *localTimeUs = (uint64_t)(hostTimeUs - offsetUs);
     return true;
+}
+
+bool LiGetHostClockRate(double* ppm, double* spanSeconds) {
+    double denominator;
+    bool valid = false;
+
+    PltLockMutex(&clockSyncLock);
+    denominator = clockRateN * clockRateSxx - clockRateSx * clockRateSx;
+    if (clockRateN >= 3 && denominator > 0 &&
+            clockRateLastHostUs - clockRateFirstHostUs >= CLOCK_RATE_MIN_SPAN_US) {
+        // The offset (host minus ours) grows by this many microseconds per second when the
+        // host's clock runs fast
+        *ppm = (clockRateN * clockRateSxy - clockRateSx * clockRateSy) / denominator;
+        *spanSeconds = (double)(clockRateLastHostUs - clockRateFirstHostUs) / 1000000.0;
+        valid = true;
+    }
+    PltUnlockMutex(&clockSyncLock);
+
+    return valid;
 }
 
 void LiSetPartialFrameDeadline(bool enabled, int64_t offsetUs, int minReceivedPercent) {

@@ -105,6 +105,13 @@ typedef struct _STREAM_CONFIGURATION {
     // frame, from 0 (none) to 255. LiInitializeStreamConfiguration() sets it to -1,
     // which leaves it to the host's own setting. Other hosts ignore it.
     int fecPercentage;
+
+    // If specified, the frame rate for Sunshine to run at in microhertz (60 Hz is 60000000),
+    // finer than clientRefreshRateX100: clients that match the host to their display's measured
+    // refresh rate need it to the microhertz, or frames drift a vsync against the display every
+    // few minutes. Sent as x-ml-video.clientRefreshRateUhz, which other hosts ignore. 0 sends
+    // nothing.
+    int clientRefreshRateUhz;
 } STREAM_CONFIGURATION, *PSTREAM_CONFIGURATION;
 
 // Use this function to zero the stream configuration when allocated on the stack or heap
@@ -1093,6 +1100,15 @@ void LiSetPartialFrameDeadline(bool enabled, int64_t offsetUs, int minReceivedPe
 // doesn't answer clock sync or hasn't yet. Safe to call from any thread while the video stream
 // is running. This is a Sunshine protocol extension.
 bool LiGetHostTimeOnLocalClock(uint64_t presentationTimeUs, uint64_t* localTimeUs);
+
+// How fast the host's clock runs against LiGetMicroseconds()'s over the stream so far, from
+// clock sync: *ppm is parts per million, positive when the host's clock runs fast, and
+// *spanSeconds how long that was measured over. A host pacing frames on its own clock sends
+// them that much faster or slower than the rate it was asked for. Returns false until clock
+// sync has spanned 30 seconds, or when the host doesn't answer clock sync. Safe to call from
+// any thread while the video stream is running (including from the connection terminated
+// callback, before LiStopConnection()). This is a Sunshine protocol extension.
+bool LiGetHostClockRate(double* ppm, double* spanSeconds);
 
 // This function requests an IDR frame from the host. Typically this is done using DR_NEED_IDR, but clients
 // processing frames asynchronously may need to reset their decoder state even after returning DR_OK for

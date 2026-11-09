@@ -391,6 +391,12 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
         snprintf(payloadStr, sizeof(payloadStr), "%d", StreamConfig.fecPercentage);
         err |= addAttributeString(&optionHead, "x-ml-video.fecPercent", payloadStr);
     }
+
+    // The frame rate to the microhertz, for Sunshine hosts that read it (others ignore it)
+    if (IS_SUNSHINE() && StreamConfig.clientRefreshRateUhz > 0) {
+        snprintf(payloadStr, sizeof(payloadStr), "%d", StreamConfig.clientRefreshRateUhz);
+        err |= addAttributeString(&optionHead, "x-ml-video.clientRefreshRateUhz", payloadStr);
+    }
     
     err |= addAttributeString(&optionHead, "x-nv-vqos[0].videoQualityScoreUpdateTime", "5000");
 
